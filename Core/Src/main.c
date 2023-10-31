@@ -23,18 +23,22 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdint.h>
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+struct GPIO_Port_Pin_S
+{
+  GPIO_TypeDef * port;
+  uint16_t pin;
+};
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define NUM_OF_DELAYS     5
-#define BASE_DELAY_TIME   100    // milliseconds
-
+#define BASE_DELAY_TIME     100    // milliseconds
+#define DEBOUNCE_WAIT_TIME  5
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -69,6 +73,8 @@ UART_HandleTypeDef huart3;
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
+
+static volatile bool ChangeLED;   // Used in the EXTI13 ISR to indicate button has been pressed and next LED should be selected
 
 /* USER CODE END PV */
 
@@ -126,6 +132,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    // Declarations and definitions for blink timing
     static const uint8_t DELAY_MULTIPLIERS[] =
     {
       16, 16,
@@ -138,19 +145,41 @@ int main(void)
       8, 8, 8, 8,
       16, 16,
     };
-    static uint8_t delay_idx = 0;
+    static uint8_t Delay_Idx = 0;
+
+    // Declarations and definitions for LED selection
+    static const struct GPIO_Port_Pin_S LED_OPTIONS_TABLE[] =
+    {
+      { LD1_GPIO_Port,  LD1_Pin },
+      { LD2_GPIO_Port,  LD2_Pin },
+      { LD3_GPIO_Port,  LD3_Pin },
+    };
+    static uint8_t LED_Idx = 0;
+
+    // Check if B1 ISR was triggered, and if yes, switch to next LED
+    if ( ChangeLED == true )
+    {
+      ChangeLED = false;  // reset interrupt flag
+      HAL_Delay( DEBOUNCE_WAIT_TIME );  // TODO: Handle debounces without a delay...
+      LED_Idx++;
+      // Wrap-around if past table bounds
+      if ( LED_Idx >= (sizeof(LED_OPTIONS_TABLE) / sizeof(struct GPIO_Port_Pin_S)) )
+      {
+        LED_Idx = 0;
+      }
+    }
 
     // Toggle the LED
-    HAL_GPIO_TogglePin( LD1_GPIO_Port, LD1_Pin );
+    HAL_GPIO_TogglePin( LED_OPTIONS_TABLE[LED_Idx].port, LED_OPTIONS_TABLE[LED_Idx].pin );
 
     // Wait this cycle's time
-    HAL_Delay( BASE_DELAY_TIME * DELAY_MULTIPLIERS[delay_idx] );
+    HAL_Delay( BASE_DELAY_TIME * DELAY_MULTIPLIERS[Delay_Idx] );
 
     // Increment the delay index to get the next cycle's delay time, include wrap-around
-    delay_idx++;
-    if ( delay_idx >= sizeof(DELAY_MULTIPLIERS) )
+    Delay_Idx++;
+    if ( Delay_Idx >= ( sizeof(DELAY_MULTIPLIERS) / sizeof(uint8_t) ) )
     {
-      delay_idx = 0;
+      Delay_Idx = 0;
     }
 
     /* USER CODE END WHILE */
@@ -424,6 +453,20 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief EXTI line detection callback for B1 rising edge.
+  * @note This replaces the __weak definition written in stm32h7xx_hal_gpio.c.
+  * @param GPIO_Pin: Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if ( GPIO_Pin == B1_Pin )
+  {
+    ChangeLED = true;
+  }
+}
 
 /* USER CODE END 4 */
 
